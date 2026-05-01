@@ -4,6 +4,7 @@ import fcntl
 import json
 import math
 import os
+import re
 import tempfile
 from collections import Counter
 from contextlib import contextmanager
@@ -235,6 +236,188 @@ def compute_best_record(
         ):
             best_record = candidate
     return best_record
+
+
+def find_iteration(rows: Iterable[dict[str, Any]], iteration: int) -> dict[str, Any]:
+    for row in rows:
+        if int(row.get("iteration", 0)) == iteration:
+            return row
+    raise RuntimeError(f"Iteration {iteration} not found")
+
+
+def amend_iteration_record(
+    row: dict[str, Any],
+    *,
+    value: float | None = None,
+    unit: str | None = None,
+    decision: str | None = None,
+    guard_status: str | None = None,
+    hypothesis: str | None = None,
+    ticket: str | None = None,
+    commit_before: str | None = None,
+    commit_after: str | None = None,
+    milestone: str | None = None,
+    summary: str | None = None,
+    timestamp: str,
+) -> dict[str, Any]:
+    amended = dict(row)
+    previous = {
+        key: row.get(key)
+        for key in (
+            "metric_value",
+            "unit",
+            "decision",
+            "guard_status",
+            "hypothesis",
+            "ticket",
+            "commit_before",
+            "commit_after",
+            "milestone",
+            "summary",
+        )
+    }
+    if value is not None:
+        amended["metric_value"] = coerce_float(value, label="iteration value")
+    if unit is not None:
+        amended["unit"] = normalize_optional_text(unit)
+    if decision is not None:
+        amended["decision"] = ensure_decision(decision)
+    if guard_status is not None:
+        amended["guard_status"] = ensure_guard_status(guard_status)
+    if hypothesis is not None:
+        amended["hypothesis"] = hypothesis
+    if ticket is not None:
+        amended["ticket"] = ticket
+    if commit_before is not None:
+        amended["commit_before"] = commit_before
+    if commit_after is not None:
+        amended["commit_after"] = commit_after
+    if milestone is not None:
+        amended["milestone"] = milestone
+    if summary is not None:
+        amended["summary"] = summary
+
+    amendments = list(amended.get("amendments") or [])
+    amendments.append({"amended_at": timestamp, "previous": previous})
+    amended["amendments"] = amendments
+    amended["updated_at"] = timestamp
+    return amended
+
+
+def build_metric_history_text(run: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+    metric = run.get("primary_metric") or {}
+    unit = normalize_optional_text(metric.get("unit"))
+    lines = ["", "Metric history"]
+    baseline = run.get("baseline")
+    if isinstance(baseline, dict):
+        lines.append(
+            "Baseline: "
+            + format_metric_value(
+                coerce_float(baseline.get("value"), label="baseline.value"),
+                normalize_optional_text(baseline.get("unit")) or unit,
+            )
+        )
+    else:
+        lines.append("Baseline: n/a")
+
+    if not rows:
+        lines.append("No iterations recorded.")
+        return "\n".join(lines)
+
+    lines.append("")
+    lines.append("Iteration  Ticket  Value  Delta prev  Delta base  Decision  Guard")
+    baseline_value = (
+        coerce_float(baseline.get("value"), label="baseline.value")
+        if isinstance(baseline, dict)
+        else None
+    )
+    previous_value = baseline_value
+    for row in sorted(rows, key=lambda item: int(item.get("iteration", 0))):
+        value = coerce_float(row.get("metric_value"), label="metric_value")
+        delta_prev = None if previous_value is None else value - previous_value
+        delta_base = None if baseline_value is None else value - baseline_value
+        ticket = Path(str(row.get("ticket", "n/a"))).name
+        lines.append(
+            f"{int(row.get('iteration', 0)):<10} "
+            f"{ticket:<7} "
+            f"{format_metric_value(value, unit):<14} "
+            f"{_format_delta(delta_prev, unit):<14} "
+            f"{_format_delta(delta_base, unit):<14} "
+            f"{str(row.get('decision')):<8} "
+            f"{str(row.get('guard_status'))}"
+        )
+        previous_value = value
+
+    warnings = latest_iteration_warnings(run, rows)
+    if warnings:
+        lines.append("")
+        lines.append("Latest iteration review")
+        lines.extend(f"- {warning}" for warning in warnings)
+    return "\n".join(lines)
+
+
+def latest_iteration_warnings(
+    run: dict[str, Any], rows: list[dict[str, Any]]
+) -> list[str]:
+    if not rows:
+        return []
+    sorted_rows = sorted(rows, key=lambda item: int(item.get("iteration", 0)))
+    latest = sorted_rows[-1]
+    latest_iteration = int(latest.get("iteration", 0))
+    latest_value = coerce_float(latest.get("metric_value"), label="metric_value")
+    baseline = run.get("baseline")
+    reference_value: float | None = None
+    reference_label = "previous iteration"
+    if len(sorted_rows) >= 2:
+        reference_value = coerce_float(
+            sorted_rows[-2].get("metric_value"), label="previous metric_value"
+        )
+    elif isinstance(baseline, dict):
+        reference_value = coerce_float(baseline.get("value"), label="baseline.value")
+        reference_label = "baseline"
+
+    warnings: list[str] = []
+    unit = normalize_optional_text((run.get("primary_metric") or {}).get("unit"))
+    if reference_value not in (None, 0):
+        swing = abs(latest_value - reference_value) / abs(reference_value)
+        if swing >= 0.9:
+            warnings.append(
+                "Latest value changed by "
+                f"{swing * 100:.1f}% from the {reference_label}. If this is a "
+                "delta or typo, amend it with: "
+                "car apps run blessed.autooptimize amend-iteration -- "
+                f"--iteration {latest_iteration} --value <correct-value>"
+            )
+
+    summary = normalize_optional_text(latest.get("summary"))
+    if summary:
+        arrow_match = re.search(
+            r"(-?\d+(?:\.\d+)?)\s*(?:->|→)\s*(-?\d+(?:\.\d+)?)",
+            summary,
+        )
+        if arrow_match:
+            before = float(arrow_match.group(1))
+            after = float(arrow_match.group(2))
+            if not (
+                math.isclose(latest_value, before, rel_tol=1e-9, abs_tol=1e-9)
+                or math.isclose(latest_value, after, rel_tol=1e-9, abs_tol=1e-9)
+            ):
+                warnings.append(
+                    "Latest summary mentions "
+                    f"{format_metric_value(before, unit)} -> "
+                    f"{format_metric_value(after, unit)}, "
+                    f"but the recorded value is {format_metric_value(latest_value, unit)}. "
+                    "If the recorded value is the improvement amount, amend it to the "
+                    "post-change absolute value."
+                )
+    return warnings
+
+
+def _format_delta(value: float | None, unit: str | None) -> str:
+    if value is None:
+        return "n/a"
+    unit_suffix = f" {unit}" if unit else ""
+    return f"{value:+.3f}{unit_suffix}"
 
 
 def build_status_payload(

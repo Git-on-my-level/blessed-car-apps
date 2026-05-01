@@ -7,6 +7,7 @@ from _autooptimize import (
     atomic_write_json,
     atomic_write_jsonl,
     build_paths,
+    build_metric_history_text,
     coerce_float,
     compute_best_record,
     ensure_decision,
@@ -76,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         atomic_write_jsonl(paths.iterations_path, rows)
         atomic_write_json(paths.run_path, run)
     print("iteration recorded")
+    print(build_metric_history_text(run, rows))
     return 0
 
 

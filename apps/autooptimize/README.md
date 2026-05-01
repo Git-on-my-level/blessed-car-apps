@@ -66,6 +66,20 @@ car apps run blessed.autooptimize record-iteration -- \
   --summary "Lowered p95 without regressions"
 ```
 
+`record-iteration` prints a compact metric history after writing the record. If
+the latest value looks wrong, amend it before closing the ticket:
+
+```bash
+car apps run blessed.autooptimize amend-iteration -- \
+  --iteration 1 \
+  --value 160.1 \
+  --summary "Corrected absolute p95 value"
+```
+
+`amend-iteration` can update the value, unit, decision, guard status,
+hypothesis, ticket, commits, milestone, or summary. It keeps an amendment audit
+entry in `iterations.jsonl` and recomputes the best result.
+
 Check status and render artifacts:
 
 ```bash
@@ -74,6 +88,10 @@ car apps run blessed.autooptimize plan-next-ticket -- --json
 car apps run blessed.autooptimize validate-state
 car apps run blessed.autooptimize render-summary-card
 ```
+
+`validate-state` performs structural validation and only surfaces metric-review
+hints for the latest iteration, so the current agent can amend actionable
+mistakes without being asked to repair old context it may not understand.
 
 ## State and artifacts
 
@@ -96,8 +114,10 @@ generated directly so chat surfaces do not need SVG rendering support.
 3. Run `plan-next-ticket` and apply the recommended baseline template.
 4. After every baseline or iteration ticket, run `plan-next-ticket` and apply
    its recommended template.
-5. Use `status` frequently to review progress and stop-condition hints.
-6. Finish with the closeout template, `validate-state`, and
+5. After every iteration record, read the printed metric history and run
+   `amend-iteration` immediately if the latest value is wrong.
+6. Use `status` frequently to review progress and stop-condition hints.
+7. Finish with the closeout template, `validate-state`, and
    `render-summary-card`.
 
 The loop is ticket-driven on purpose. Hooks render or attach artifacts at
