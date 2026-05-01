@@ -50,6 +50,10 @@ tools:
     description: Append one iteration record and update the current best result.
     argv: ["python3", "scripts/record_iteration.py"]
     timeout_seconds: 15
+  amend-iteration:
+    description: Amend a recorded iteration value or metadata and recompute the best result.
+    argv: ["python3", "scripts/amend_iteration.py"]
+    timeout_seconds: 15
   status:
     description: Print or emit JSON campaign status.
     argv: ["python3", "scripts/status.py"]

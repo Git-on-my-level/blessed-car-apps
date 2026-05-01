@@ -114,6 +114,8 @@ def test_autooptimize_end_to_end_scripts(tmp_path: Path) -> None:
         env=env,
     )
     assert keep_result.returncode == 0, keep_result.stderr
+    assert "Metric history" in keep_result.stdout
+    assert "Baseline: 120.000 ms" in keep_result.stdout
 
     discard_result = _run_script(
         "record_iteration.py",
@@ -136,6 +138,7 @@ def test_autooptimize_end_to_end_scripts(tmp_path: Path) -> None:
         env=env,
     )
     assert discard_result.returncode == 0, discard_result.stderr
+    assert "Delta prev" in discard_result.stdout
 
     run_payload = _read_json(run_path)
     assert run_payload["baseline"]["value"] == 120.0
@@ -367,6 +370,167 @@ def test_record_iteration_force_replaces_duplicate_iteration(tmp_path: Path) -> 
     run_payload = _read_json(run_path)
     assert run_payload["best"]["source"] == "baseline"
     assert run_payload["best"]["value"] == 100.0
+
+
+def test_amend_iteration_updates_value_and_recomputes_best(tmp_path: Path) -> None:
+    env = _app_env(tmp_path)
+    run_path = Path(env["CAR_APP_STATE_DIR"]) / "run.json"
+    iterations_path = Path(env["CAR_APP_STATE_DIR"]) / "iterations.jsonl"
+
+    assert (
+        _run_script(
+            "init_run.py",
+            "--goal",
+            "Reduce markdown LOC",
+            "--metric",
+            "Markdown Code lines",
+            "--direction",
+            "lower",
+            "--unit",
+            "lines",
+            env=env,
+        ).returncode
+        == 0
+    )
+    assert (
+        _run_script(
+            "record_baseline.py",
+            "--value",
+            "11177",
+            "--unit",
+            "lines",
+            env=env,
+        ).returncode
+        == 0
+    )
+
+    mistaken_result = _run_script(
+        "record_iteration.py",
+        "--iteration",
+        "1",
+        "--ticket",
+        "TICKET-004.md",
+        "--hypothesis",
+        "Consolidate Telegram docs",
+        "--value",
+        "35",
+        "--unit",
+        "lines",
+        "--decision",
+        "keep",
+        "--summary",
+        "Baseline 13152 -> 13117 tracked Markdown LOC",
+        env=env,
+    )
+    assert mistaken_result.returncode == 0, mistaken_result.stderr
+    assert "99.7% from the baseline" in mistaken_result.stdout
+    assert "recorded value is 35.000 lines" in mistaken_result.stdout
+
+    amend_result = _run_script(
+        "amend_iteration.py",
+        "--iteration",
+        "1",
+        "--value",
+        "13117",
+        "--summary",
+        "Corrected absolute metric after Telegram docs consolidation",
+        env=env,
+    )
+
+    assert amend_result.returncode == 0, amend_result.stderr
+    assert "iteration amended" in amend_result.stdout
+    assert "13117.000 lines" in amend_result.stdout
+
+    rows = _read_jsonl(iterations_path)
+    assert rows[0]["metric_value"] == 13117.0
+    assert (
+        rows[0]["summary"]
+        == "Corrected absolute metric after Telegram docs consolidation"
+    )
+    assert rows[0]["amendments"][0]["previous"]["metric_value"] == 35.0
+
+    run_payload = _read_json(run_path)
+    assert run_payload["best"]["source"] == "baseline"
+    assert run_payload["best"]["value"] == 11177.0
+
+
+def test_validate_state_surfaces_latest_iteration_only_for_metric_review(
+    tmp_path: Path,
+) -> None:
+    env = _app_env(tmp_path)
+
+    assert (
+        _run_script(
+            "init_run.py",
+            "--goal",
+            "Reduce markdown LOC",
+            "--metric",
+            "Markdown Code lines",
+            "--direction",
+            "lower",
+            "--unit",
+            "lines",
+            env=env,
+        ).returncode
+        == 0
+    )
+    assert (
+        _run_script(
+            "record_baseline.py",
+            "--value",
+            "11177",
+            "--unit",
+            "lines",
+            env=env,
+        ).returncode
+        == 0
+    )
+    assert (
+        _run_script(
+            "record_iteration.py",
+            "--iteration",
+            "1",
+            "--ticket",
+            "TICKET-001.md",
+            "--hypothesis",
+            "Bad old value",
+            "--value",
+            "35",
+            "--unit",
+            "lines",
+            "--decision",
+            "keep",
+            env=env,
+        ).returncode
+        == 0
+    )
+    assert (
+        _run_script(
+            "record_iteration.py",
+            "--iteration",
+            "2",
+            "--ticket",
+            "TICKET-002.md",
+            "--hypothesis",
+            "Current value is plausible",
+            "--value",
+            "10422",
+            "--unit",
+            "lines",
+            "--decision",
+            "keep",
+            env=env,
+        ).returncode
+        == 0
+    )
+
+    validate_result = _run_script("validate_state.py", env=env)
+
+    assert validate_result.returncode == 0, validate_result.stderr
+    assert "autooptimize state is valid" in validate_result.stdout
+    assert "latest iteration review" in validate_result.stdout
+    assert "--iteration 2" in validate_result.stdout
+    assert "--iteration 1" not in validate_result.stdout
 
 
 def test_validate_state_reports_invalid_best_without_traceback(tmp_path: Path) -> None:
