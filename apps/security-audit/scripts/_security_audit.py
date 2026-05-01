@@ -187,25 +187,13 @@ def parse_report(markdown: str) -> dict[str, Any]:
             if not finding.get(field):
                 errors.append(f"finding {index} missing {field}")
 
-    counts = finding_counts(findings)
-    health_score = compute_health_score(counts["severity_counts"])
     return {
         "valid": not errors,
         "errors": errors,
         "required_sections": list(REQUIRED_REPORT_SECTIONS),
         "findings": findings,
-        "health_score": health_score,
-        **counts,
+        **finding_counts(findings),
     }
-
-
-def compute_health_score(severity_counts: dict[str, int]) -> int:
-    score = 100
-    score -= int(severity_counts.get("P0", 0)) * 35
-    score -= int(severity_counts.get("P1", 0)) * 18
-    score -= int(severity_counts.get("P2", 0)) * 7
-    score -= int(severity_counts.get("P3", 0)) * 2
-    return max(0, min(100, score))
 
 
 def _headings(markdown: str) -> set[str]:
@@ -262,7 +250,6 @@ def build_scorecard_markdown(data: dict[str, Any]) -> str:
     lines = [
         "# Security Audit Scorecard",
         "",
-        f"- Health score: {data['health_score']}/100",
         f"- Findings: {data['finding_count']}",
         "",
         "## Severity Counts",
@@ -283,8 +270,8 @@ def build_scorecard_markdown(data: dict[str, Any]) -> str:
 
 
 def build_scorecard_png(data: dict[str, Any]) -> bytes:
-    width = 1000
-    height = 620
+    width = 1100
+    height = 640
     image = _new_image(width, height, (248, 250, 252))
     _fill_rect(image, width, 24, 24, width - 48, height - 48, (255, 255, 255))
     _rect(image, width, 24, 24, width - 48, height - 48, (203, 213, 225))
@@ -296,7 +283,7 @@ def build_scorecard_png(data: dict[str, Any]) -> bytes:
         width,
         50,
         96,
-        f"HEALTH {data['health_score']}/100  FINDINGS {data['finding_count']}",
+        f"FINDINGS {data['finding_count']}",
         (51, 65, 85),
         scale=2,
     )
@@ -309,33 +296,87 @@ def build_scorecard_png(data: dict[str, Any]) -> bytes:
         "P3": (37, 99, 235),
     }
     max_count = max([1, *[int(severity_counts.get(sev, 0)) for sev in SEVERITIES]])
+    left_x = 70
+    left_y = 164
+    column_width = 420
+    chart_height = 330
+    bar_width = 58
+    gap = 44
+    baseline_y = left_y + chart_height
+    _draw_text(image, width, left_x, 132, "ISSUES BY SEVERITY", (15, 23, 42), scale=2)
+    _fill_rect(
+        image,
+        width,
+        left_x,
+        baseline_y,
+        column_width,
+        2,
+        (203, 213, 225),
+    )
     for index, severity in enumerate(SEVERITIES):
         count = int(severity_counts.get(severity, 0))
-        y = 160 + index * 72
-        _draw_text(image, width, 70, y, severity, (15, 23, 42), scale=3)
-        bar_width = int(560 * count / max_count)
-        _fill_rect(image, width, 150, y + 4, 560, 34, (226, 232, 240))
-        if bar_width:
-            _fill_rect(image, width, 150, y + 4, bar_width, 34, colors[severity])
-        _draw_text(image, width, 740, y + 4, str(count), (15, 23, 42), scale=3)
+        x = left_x + 28 + index * (bar_width + gap)
+        filled_height = int((chart_height - 80) * count / max_count)
+        _fill_rect(
+            image,
+            width,
+            x,
+            left_y + 34,
+            bar_width,
+            chart_height - 34,
+            (241, 245, 249),
+        )
+        if filled_height:
+            _fill_rect(
+                image,
+                width,
+                x,
+                baseline_y - filled_height,
+                bar_width,
+                filled_height,
+                colors[severity],
+            )
+        _rect(
+            image,
+            width,
+            x,
+            left_y + 34,
+            bar_width,
+            chart_height - 34,
+            (226, 232, 240),
+        )
+        _draw_text(image, width, x + 13, left_y, str(count), (15, 23, 42), scale=3)
+        _draw_text(
+            image, width, x + 8, baseline_y + 18, severity, (51, 65, 85), scale=2
+        )
 
-    _draw_text(image, width, 70, 465, "TOP CATEGORIES", (15, 23, 42), scale=2)
+    divider_x = 545
+    _fill_rect(image, width, divider_x, 130, 2, 440, (226, 232, 240))
+    right_x = 590
+    right_y = 132
+    _draw_text(image, width, right_x, right_y, "TOP CATEGORIES", (15, 23, 42), scale=2)
     categories = sorted(
         (data.get("category_counts") or {}).items(),
         key=lambda item: (-item[1], item[0]),
-    )[:5]
+    )[:10]
     if not categories:
-        _draw_text(image, width, 70, 502, "NONE", (100, 116, 139), scale=2)
+        _draw_text(
+            image, width, right_x, right_y + 48, "NONE", (100, 116, 139), scale=2
+        )
     for index, (category, count) in enumerate(categories):
+        y = right_y + 48 + index * 42
+        color = (15, 118, 110) if index < 3 else (100, 116, 139)
+        _fill_rect(image, width, right_x, y + 2, 18, 18, color)
         _draw_text(
             image,
             width,
-            70,
-            502 + index * 22,
-            f"{_truncate(category.upper(), 32)} {count}",
+            right_x + 34,
+            y,
+            _truncate(category.upper(), 30),
             (51, 65, 85),
             scale=2,
         )
+        _draw_text(image, width, 1010, y, str(count), (15, 23, 42), scale=2)
     return _png_bytes(image, width, height)
 
 

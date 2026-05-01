@@ -144,7 +144,7 @@ The scorecard should show one P1 and one P2.
     assert validate_result.returncode == 0, validate_result.stderr
     report_data = json.loads((artifact_dir / "report-data.json").read_text())
     assert report_data["valid"] is True
-    assert report_data["health_score"] == 75
+    assert "health_score" not in report_data
     assert report_data["severity_counts"] == {"P0": 0, "P1": 1, "P2": 1, "P3": 0}
     assert report_data["category_counts"] == {
         "authorization": 1,
@@ -157,7 +157,7 @@ The scorecard should show one P1 and one P2.
     scorecard_md = (artifact_dir / "scorecard.md").read_text(encoding="utf-8")
     scorecard_png = (artifact_dir / "security-audit-scorecard.png").read_bytes()
     assert "Security Audit Scorecard" in scorecard_md
-    assert "Health score: 75/100" in scorecard_md
+    assert "Health score" not in scorecard_md
     assert "- P1: 1" in scorecard_md
     assert "- authorization: 1" in scorecard_md
     assert scorecard_png.startswith(b"\x89PNG\r\n\x1a\n")
