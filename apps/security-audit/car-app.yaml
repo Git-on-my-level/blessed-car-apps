@@ -1,0 +1,113 @@
+schema_version: 1
+id: blessed.security-audit
+name: Security Audit
+version: 0.1.0
+description: >
+  Structured security audit workflow for architecture discovery, maturity
+  calibration, focused attack-vector review, finding capture, and final report
+  scorecard generation.
+
+entrypoint:
+  template: templates/bootstrap.md
+
+inputs:
+  audit_scope:
+    required: true
+    description: Codebase, product surface, or subsystem to audit.
+  threat_model:
+    required: false
+    description: Known attacker model, assets, or security concerns.
+  maturity_hint:
+    required: false
+    description: Project maturity hint such as prototype, beta, production, or regulated.
+  depth:
+    required: false
+    description: Audit depth hint such as quick, standard, or deep.
+  focus:
+    required: false
+    description: Focus area for checklist tickets, such as auth, input parsing, or dependencies.
+
+templates:
+  bootstrap:
+    path: templates/bootstrap.md
+    description: Start the audit and queue architecture discovery.
+  architecture:
+    path: templates/architecture.md
+    description: Map architecture, dependencies, entrypoints, data flows, and trust boundaries.
+  maturity:
+    path: templates/maturity.md
+    description: Calibrate maturity and recommendation scope before deep review.
+  focus-map:
+    path: templates/focus-map.md
+    description: Identify hot spots and attack-vector classes for focused tickets.
+  checklist:
+    path: templates/checklist.md
+    description: Audit one category, attack vector, subsystem, or hot spot.
+  synthesis:
+    path: templates/synthesis.md
+    description: Produce the final report, validate it, and render the scorecard.
+
+tools:
+  init-audit:
+    description: Initialize or reset security audit state.
+    argv: ["python3", "scripts/init_audit.py"]
+    timeout_seconds: 15
+  record-finding:
+    description: Append one normalized audit finding to app-owned state.
+    argv: ["python3", "scripts/record_finding.py"]
+    timeout_seconds: 15
+  status:
+    description: Print current audit state and finding counts.
+    argv: ["python3", "scripts/status.py"]
+    timeout_seconds: 10
+  validate-report:
+    description: Validate the final markdown report and emit parsed scorecard data.
+    argv: ["python3", "scripts/validate_report.py"]
+    timeout_seconds: 15
+    outputs:
+      - kind: json
+        path: artifacts/report-data.json
+        label: "Security audit report data"
+  render-scorecard:
+    description: Render markdown, JSON, and PNG scorecard artifacts from the final report.
+    argv: ["python3", "scripts/render_scorecard.py"]
+    timeout_seconds: 30
+    outputs:
+      - kind: markdown
+        path: artifacts/scorecard.md
+        label: "Security audit scorecard"
+      - kind: json
+        path: artifacts/report-data.json
+        label: "Security audit report data"
+      - kind: image
+        path: artifacts/security-audit-scorecard.png
+        label: "Security audit scorecard (PNG)"
+
+hooks:
+  after_flow_terminal:
+    - tool: render-scorecard
+      when:
+        status: completed
+      failure: warn
+  before_chat_wrapup:
+    - artifacts:
+        - "artifacts/security-audit-report.md"
+        - "artifacts/scorecard.md"
+        - "artifacts/security-audit-scorecard.png"
+  after_flow_archive:
+    - cleanup_paths:
+        - "state/audit.json"
+        - "state/findings.jsonl"
+        - "artifacts/report-data.json"
+        - "artifacts/scorecard.md"
+        - "artifacts/security-audit-scorecard.png"
+      failure: warn
+
+permissions:
+  network: false
+  writes:
+    - "state/**"
+    - "artifacts/**"
+    - "logs/**"
+  reads:
+    - "**"

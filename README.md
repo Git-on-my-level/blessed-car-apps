@@ -21,6 +21,7 @@ tools and hooks.
 | App | Path | Purpose |
 | --- | --- | --- |
 | `blessed.autooptimize` | `apps/autooptimize` | Metric-driven iterative optimization workflow with app-owned state, ticket templates, tools, hooks, and summary artifacts. |
+| `blessed.security-audit` | `apps/security-audit` | Structured security audit workflow with architecture discovery, maturity calibration, focused checklist tickets, finding capture, final report validation, and PNG scorecard generation. |
 
 ## Trust
 
