@@ -153,9 +153,14 @@ def finding_counts(findings: Iterable[dict[str, Any]]) -> dict[str, Any]:
     severity_counts = Counter({severity: 0 for severity in SEVERITIES})
     category_counts: Counter[str] = Counter()
     for finding in findings:
-        severity = normalize_severity(str(finding.get("severity", "")))
+        try:
+            severity = normalize_severity(str(finding.get("severity", "")))
+        except RuntimeError:
+            severity = "P3"
         category = (
-            normalize_text(finding.get("category"), label="finding.category")
+            normalize_text(
+                finding.get("category"), label="finding.category", required=False
+            )
             or "uncategorized"
         )
         severity_counts[severity] += 1
